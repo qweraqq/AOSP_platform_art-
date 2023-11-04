@@ -55,6 +55,8 @@
 #include "scoped_thread_state_change-inl.h"
 #include "well_known_classes.h"
 
+
+
 namespace art {
 
 using android::base::StringPrintf;
@@ -239,6 +241,82 @@ struct ScopedIntArrayAccessor {
   jintArray array_;
   jint* elements_;
 };
+
+static int dex_index = 0;
+
+static void convert_java_array_to_dexfiles(JNIEnv *env, jobject mCookie,
+                                           std::vector<const art::DexFile *> &dex_files);
+
+static bool toDexFiles_8_0(JNIEnv *env, jobject mCookie, std::vector<const art::DexFile *> &dex_files);
+
+
+bool toDexFiles_8_0(JNIEnv *env, jobject mCookie, std::vector<const art::DexFile *> &dex_files) {
+    jarray array = reinterpret_cast<jarray>(mCookie);
+    jsize array_size = env->GetArrayLength(array);
+    if (env->ExceptionCheck() == JNI_TRUE) {
+        return false;
+    }
+
+    jboolean is_long_data_copied;
+    jlong *long_data = env->GetLongArrayElements(reinterpret_cast<jlongArray>(array),
+                                                 &is_long_data_copied);
+    if (env->ExceptionCheck() == JNI_TRUE) {
+        return false;
+    }
+
+    dex_files.reserve(array_size - 1);
+    // kDexFileIndexStart = 1
+    for (jsize i = 1; i < array_size; ++i) {
+        dex_files.push_back(
+                reinterpret_cast<const art::DexFile *>(static_cast<uintptr_t>(long_data[i])));
+    }
+
+    return true;
+}
+void convert_java_array_to_dexfiles(JNIEnv *env, jobject mCookie,
+                                    std::vector<const art::DexFile *> &dex_files) {
+    toDexFiles_8_0(env, mCookie, dex_files);
+}
+
+static int dump_complete_dex(art::DexFile *dexFile, char *save_path) {
+    int fd = open(save_path, O_CREAT | O_EXCL | O_WRONLY, 0777);
+    if (fd < 0) {
+        return JNI_ERR;
+    }
+
+    write(fd, dexFile->Begin(), dexFile->Size());
+    close(fd);
+    return JNI_OK;
+}
+
+static void DexFile_xxDump(JNIEnv *env, jclass, jstring dump_path,
+                           jobject m_cookie) {
+    // convert m_cookie to dex_file
+    std::vector<const art::DexFile *> dex_files;
+    convert_java_array_to_dexfiles(env, m_cookie, dex_files);
+    if (dex_files.empty()) {
+        return;
+    }
+
+    const char *save_dir = "/data/local/tmp";
+    if (dump_path != nullptr) {
+        ScopedUtfChars path_str(env, dump_path);
+        save_dir = path_str.c_str();
+    }
+
+
+    static char save_path[256];
+    for (unsigned long j = 0; j < dex_files.size(); j++) {
+        memset(save_path, 0, 256);
+        snprintf(save_path, 255, "%s%d%s", save_dir, dex_index++, ".dex");
+        art::DexFile *dexFile = const_cast<art::DexFile *> (dex_files.at(j));
+        if (dexFile == nullptr) {
+            continue;
+        }
+        if (dump_complete_dex(dexFile, save_path) == JNI_ERR) {
+        }
+    }
+}
 
 static jobject DexFile_openInMemoryDexFilesNative(JNIEnv* env,
                                                   jclass,
@@ -971,7 +1049,11 @@ static JNINativeMethod gMethods[] = {
   NATIVE_METHOD(DexFile, getStaticSizeOfDexFile, "(Ljava/lang/Object;)J"),
   NATIVE_METHOD(DexFile, getDexFileOptimizationStatus,
                 "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;"),
-  NATIVE_METHOD(DexFile, setTrusted, "(Ljava/lang/Object;)V")
+  NATIVE_METHOD(DexFile, setTrusted, "(Ljava/lang/Object;)V"),
+  NATIVE_METHOD(DexFile, xxDump,
+                "(Ljava/lang/String;"
+                "Ljava/lang/Object;"
+                ")V")
 };
 
 void register_dalvik_system_DexFile(JNIEnv* env) {
