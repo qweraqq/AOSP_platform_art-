@@ -284,7 +284,10 @@ static int dump_complete_dex(art::DexFile *dexFile, char *save_path) {
         return JNI_ERR;
     }
 
-    write(fd, dexFile->Begin(), dexFile->Size());
+    int ignored = write(fd, dexFile->Begin(), dexFile->Size());
+    if (ignored == 0){
+        ;
+    }
     close(fd);
     return JNI_OK;
 }
